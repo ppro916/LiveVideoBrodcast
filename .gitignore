@@ -1,4 +1,18 @@
+# Ignore Databases and Backups
 *.db
+*.sqlite
+*.sqlite3
 *.bak
-*.bak*
+*.bak[0-9]*
+
+# Ignore Media files
 media/
+*.jpg
+*.jpeg
+*.png
+*.mp4
+*.mkv
+
+# Ignore Python Cache
+__pycache__/
+*.pyc
