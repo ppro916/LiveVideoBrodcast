@@ -1,0 +1,49 @@
+<!DOCTYPE html><html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Broadcast Server</title>
+<style>*{box-sizing:border-box;margin:0;padding:0}body{font-family:system-ui,sans-serif;background:#0e1116;color:#e6edf3;padding:16px;max-width:1100px;margin:0 auto}header{display:flex;justify-content:space-between;align-items:center;padding:10px 0;border-bottom:1px solid #21262d;margin-bottom:16px;flex-wrap:wrap;gap:8px}h1{font-size:17px;letter-spacing:1px}.badge{font-size:12px;padding:4px 10px;border-radius:12px;border:1px solid;color:#3fb950;border-color:#238636;background:rgba(35,134,54,.12)}.stats{display:flex;gap:12px;margin:14px 0;flex-wrap:wrap}.stat{flex:1;min-width:120px;background:#161b22;border:1px solid #21262d;border-radius:8px;padding:12px}.stat .l{font-size:11px;color:#8b949e;text-transform:uppercase;letter-spacing:.5px}.stat .v{font-size:22px;font-weight:700;margin-top:4px}.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(170px,1fr));gap:10px}.card{background:#161b22;border:1px solid #21262d;border-radius:8px;padding:12px}.card.online{border-color:#238636}.card.offline{border-color:#da3633;opacity:.7}.card .id{font-family:monospace;font-weight:700}.card .nm{font-size:12px;color:#8b949e}.card .st{font-size:12px;margin-top:6px}.card.online .st{color:#3fb950}.card.offline .st{color:#f85149}.links{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:10px;margin-top:22px}.links a{text-align:center;padding:16px;border-radius:8px;color:#fff;text-decoration:none;font-weight:700;letter-spacing:.5px}.l1{background:#1f6feb}.l2{background:#da3633}.l3{background:#238636}#dbg{font:11px monospace;color:#6e7681;margin-top:10px;word-break:break-all}h2{font-size:13px;color:#8b949e;letter-spacing:1px;margin:14px 0 8px}</style></head><body>
+<header><h1>BROADCAST SERVER</h1><div id="ss" class="badge">ONLINE</div></header>
+<section class="stats">
+<div class="stat"><div class="l">Program</div><div class="v" id="pg" style="font-size:15px">—</div></div>
+<div class="stat"><div class="l">Cameras</div><div class="v" id="t">0</div></div>
+<div class="stat"><div class="l">Online</div><div class="v" id="on" style="color:#3fb950">0</div></div>
+<div class="stat"><div class="l">Viewers</div><div class="v" id="vw" style="color:#1f6feb">0</div></div>
+</section>
+<h2>CAMERAS</h2><div id="list" class="grid"></div>
+<div class="links"><a class="l1" href="/control">🎬 DIRECTOR CONSOLE</a><a class="l2" href="/watch">📺 AUDIENCE VIEW</a><a class="l3" href="/camera">📷 CAMERA NODE</a></div>
+<div id="dbg">booting…</div>
+<script>
+(function(){
+'use strict';
+function log(){var a=[].slice.call(arguments);console.log.apply(console,a);document.getElementById('dbg').textContent=a.join(' ');}
+function gid(){try{if(window.crypto&&crypto.getRandomValues){var a=new Uint8Array(6);crypto.getRandomValues(a);return Array.from(a).map(function(x){return x.toString(16).padStart(2,'0');}).join('');}}catch(e){}return 'd-'+Math.random().toString(36).slice(2)+Date.now().toString(36);}
+var myId=gid(),since=0,cams={},fail=0;
+function r(){
+  var a=Object.values(cams).sort(function(x,y){return x.camera_id.localeCompare(y.camera_id);});
+  var L=document.getElementById('list');L.innerHTML='';
+  a.forEach(function(c){var d=document.createElement('div');d.className='card '+(c.status||'offline');
+    d.innerHTML='<div class="id">'+c.camera_id+'</div>'+(c.name?'<div class="nm">'+c.name+'</div>':'')+
+    '<div class="st">'+(c.status==='online'?'ONLINE':'OFFLINE')+'</div>';L.appendChild(d);});
+  var on=a.filter(function(c){return c.status==='online';}).length;
+  document.getElementById('t').textContent=a.length;
+  document.getElementById('on').textContent=on;}
+function loop(){
+  fetch('/poll?id='+encodeURIComponent(myId)+'&since='+since+'&role=dash',{cache:'no-store'})
+  .then(function(r){return r.json();})
+  .then(function(d){
+    since=d.since||0;
+    (d.cameras||[]).forEach(function(c){cams[c.camera_id]=c;});
+    (d.events||[]).forEach(function(e){
+      if(e.evt==='camera_status'){var s=e.data;
+        if(!cams[s.camera_id])cams[s.camera_id]={camera_id:s.camera_id,status:s.status};
+        else cams[s.camera_id].status=s.status;
+        if(s.name)cams[s.camera_id].name=s.name;}});
+    if(d.program){var p=d.program;
+      document.getElementById('pg').textContent=
+        p.source==='camera'?(p.title||p.camera_id):p.source==='ad'?('AD · '+(p.title||'')):(p.title||'SLATE');}
+    document.getElementById('vw').textContent=d.viewers||0;
+    r();fail=0;
+  })
+  .catch(function(e){fail++;log('poll err '+fail);})
+  .then(function(){setTimeout(loop,500);});}
+log('starting id='+myId);loop();
+})();
+</script></body></html>

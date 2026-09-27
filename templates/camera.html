@@ -1,0 +1,92 @@
+<!DOCTYPE html><html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Camera Node</title>
+<style>*{box-sizing:border-box;margin:0;padding:0}body{font-family:system-ui,sans-serif;background:#0e1116;color:#e6edf3;padding:14px;max-width:1000px;margin:0 auto}header{display:flex;justify-content:space-between;align-items:center;padding:10px 0;border-bottom:1px solid #21262d;margin-bottom:14px}h1{font-size:17px;letter-spacing:1px}.badge{font-size:12px;padding:4px 10px;border-radius:12px;border:1px solid}.ok{color:#3fb950;border-color:#238636;background:rgba(35,134,54,.12)}.bad{color:#f85149;border-color:#da3633;background:rgba(218,54,51,.12)}.warn{color:#d29922;border-color:#9e6a03;background:rgba(210,153,34,.12)}.live{color:#fff;border-color:#f85149;background:#da3633;animation:bp 1.2s infinite}@keyframes bp{50%{opacity:.45}}label{display:block;font-size:12px;color:#8b949e;margin:10px 0 5px;text-transform:uppercase;letter-spacing:.5px}input{width:100%;padding:11px;background:#0d1117;border:1px solid #30363d;border-radius:6px;color:#e6edf3;font:16px monospace;letter-spacing:1px}input:focus{outline:none;border-color:#1f6feb}.row{display:flex;gap:8px;margin-top:10px;flex-wrap:wrap}button{flex:1;min-width:120px;padding:11px 16px;border:none;border-radius:6px;background:#238636;color:#fff;font-weight:600;font-size:14px;cursor:pointer}button:hover:not(:disabled){opacity:.88}button:disabled{opacity:.4;cursor:not-allowed}button.sec{background:#30363d}button.dgr{background:#da3633}.msg{margin-top:8px;font-size:12px;min-height:18px;font-family:monospace;white-space:pre-wrap}.err{color:#f85149}.gok{color:#3fb950}#preview{width:100%;max-height:60vh;background:#000;border-radius:8px;border:1px solid #21262d;display:block;margin-top:12px}.info{display:flex;justify-content:space-between;align-items:center;margin:10px 0;font-size:13px;flex-wrap:wrap;gap:8px}.hidden{display:none}#dbg{font:10px monospace;color:#6e7681;padding:6px 0;word-break:break-all}</style></head><body>
+<header><h1>CAMERA NODE</h1><div id="cn" class="badge warn">CONNECTING…</div></header>
+<section id="reg">
+<label for="cid">Camera ID</label><input id="cid" placeholder="CAMERA-001" autocapitalize="characters" autocomplete="off" spellcheck="false">
+<label for="nm">Camera Name</label><input id="nm" placeholder="Stump Cam / Front Gate" autocomplete="off" maxlength="64">
+<div class="row"><button id="breg" disabled>CONNECT</button><button id="bauto" class="sec">AUTO ID</button></div>
+<div id="rmsg" class="msg"></div>
+</section>
+<section id="stream" class="hidden">
+<div class="info"><span>ID: <b id="dcid">-</b></span><span id="air" class="badge warn">STANDBY</span></div>
+<video id="preview" autoplay playsinline muted></video>
+<div class="row"><button id="bs">START CAMERA</button><button id="bt" class="dgr" disabled>STOP</button><button id="bm" class="sec" disabled>MUTE</button></div>
+<div id="clog" class="msg"></div>
+</section>
+<div id="dbg">booting…</div>
+<script>
+(function(){
+'use strict';
+function log(){var a=[].slice.call(arguments);console.log.apply(console,a);
+  var e=document.getElementById('clog');if(e)e.textContent=a.join(' ');
+  document.getElementById('dbg').textContent=a.join(' ');}
+function gid(){try{if(window.crypto&&crypto.getRandomValues){var a=new Uint8Array(6);crypto.getRandomValues(a);return Array.from(a).map(function(x){return x.toString(16).padStart(2,'0');}).join('');}}catch(e){}return 'c-'+Math.random().toString(36).slice(2)+Date.now().toString(36);}
+var myId;try{myId=sessionStorage.getItem('myId');}catch(e){}
+if(!myId){myId=gid();try{sessionStorage.setItem('myId',myId);}catch(e){}}
+var $id=function(x){return document.getElementById(x);};
+var since=0,ready=false,stream=null,peers={},regId=null,muted=false,fail=0;
+function setConn(ok,txt){var e=$id('cn');e.textContent=txt||(ok?'ONLINE':'CONNECTING…');e.className='badge '+(ok?'ok':'warn');}
+function setMsg(t,c){$id('rmsg').textContent=t;$id('rmsg').className='msg '+(c||'');}
+function setAir(p){var on=p&&p.source==='camera'&&p.camera_id===regId;
+  var e=$id('air');if(!e)return;e.textContent=on?'● ON AIR':(p&&p.source==='ad'?'AD BREAK':'STANDBY');
+  e.className='badge '+(on?'live':'warn');}
+function post(p,b){return fetch(p,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(b)}).then(function(r){return r.json().then(function(j){return {status:r.status,body:j};});});}
+function sig(to,evt,data){return post('/signal',{from:myId,to:to,event:evt,data:data||{}}).then(function(r){if(!r.body.ok)log('sig err',evt,r.body.error);return r.body;});}
+function closePeer(id){var pc=peers[id];if(!pc)return;try{pc.onicecandidate=null;pc.onconnectionstatechange=null;pc.close();}catch(e){}delete peers[id];}
+function closeAll(){Object.keys(peers).forEach(closePeer);}
+function makeOffer(watcherId){closePeer(watcherId);
+  var pc=new RTCPeerConnection({iceServers:[{urls:'stun:stun.l.google.com:19302'}]});peers[watcherId]=pc;
+  stream.getTracks().forEach(function(t){pc.addTrack(t,stream);});
+  pc.onicecandidate=function(e){if(e.candidate)sig(watcherId,'ice',{candidate:e.candidate});};
+  pc.onconnectionstatechange=function(){log('cam->'+watcherId+' '+pc.connectionState);
+    if(['failed','closed','disconnected'].indexOf(pc.connectionState)>=0)closePeer(watcherId);};
+  return pc.createOffer().then(function(o){return pc.setLocalDescription(o);})
+    .then(function(){return sig(watcherId,'offer',{sdp:{type:pc.localDescription.type,sdp:pc.localDescription.sdp}});});}
+function register(cid){log('register '+cid);
+  return post('/register',{client_id:myId,camera_id:cid,name:$id('nm').value.trim()}).then(function(r){
+    if(!r.body.ok){setMsg('✗ '+(r.body.error||'failed'),'err');log('register failed: '+r.body.error);return false;}
+    regId=r.body.camera_id;
+    try{localStorage.setItem('camId',regId);localStorage.setItem('camName',$id('nm').value.trim());}catch(e){}
+    $id('dcid').textContent=regId;$id('reg').classList.add('hidden');$id('stream').classList.remove('hidden');
+    log('✓ registered '+regId);return true;});}
+function startCam(){if(stream)return;
+  if(!navigator.mediaDevices||!navigator.mediaDevices.getUserMedia){log('✗ getUserMedia unavailable — use the https:// tunnel URL');return;}
+  navigator.mediaDevices.getUserMedia({video:{facingMode:{ideal:'environment'},width:{ideal:1280},height:{ideal:720}},audio:true})
+  .then(function(s){stream=s;if(muted)s.getAudioTracks().forEach(function(t){t.enabled=false;});
+    $id('preview').srcObject=s;$id('bs').disabled=true;$id('bt').disabled=false;$id('bm').disabled=false;log('✓ camera started');})
+  .catch(function(e){log('✗ camera: '+e.name+' — '+e.message);});}
+function stopCam(){if(stream)stream.getTracks().forEach(function(t){t.stop();});stream=null;$id('preview').srcObject=null;
+  $id('bs').disabled=false;$id('bt').disabled=true;$id('bm').disabled=true;closeAll();log('camera stopped');}
+function handle(e){var evt=e.evt,d=e.data;
+  if(evt==='hello'){ready=true;$id('breg').disabled=false;setConn(true);log('✓ online id='+myId);}
+  else if(evt==='program'){setAir(d);}
+  else if(evt==='watch_request'){log('watch from '+d.from);if(!d.from)return;
+    if(!stream){sig(d.from,'error',{message:'Camera not started'});return;}
+    makeOffer(d.from).catch(function(x){log('offer err '+x.message);});}
+  else if(evt==='answer'){var pc=peers[d.from];if(!pc)return;
+    pc.setRemoteDescription(new RTCSessionDescription(d.sdp)).then(function(){log('✓ answer set');}).catch(function(x){log('sdp err '+x.message);});}
+  else if(evt==='ice'){var pc=peers[d.from];if(!pc||!d.candidate)return;
+    pc.addIceCandidate(new RTCIceCandidate(d.candidate)).catch(function(){});}
+  else if(evt==='stop_watching'){if(d.from)closePeer(d.from);}}
+function loop(){
+  fetch('/poll?id='+encodeURIComponent(myId)+'&since='+since+'&role=camera',{cache:'no-store'})
+  .then(function(r){return r.json();})
+  .then(function(d){since=d.since||0;(d.events||[]).forEach(handle);
+    if(d.program)setAir(d.program);fail=0;setConn(true);})
+  .catch(function(e){fail++;log('poll err '+fail);
+    if(fail>=3)setConn(false,'RECONNECTING…');})
+  .then(function(){setTimeout(loop,400);});}
+$id('breg').addEventListener('click',function(){
+  if(!ready){setMsg('✗ Not connected yet — wait a moment','err');return;}
+  var id=($id('cid').value||'').trim().toUpperCase();
+  if(!/^CAMERA-\d{3,}$/.test(id)){setMsg('✗ Format: CAMERA-001','err');return;}
+  setMsg('Registering…');register(id);});
+$id('bauto').addEventListener('click',function(){fetch('/api/next-id').then(function(r){return r.json();}).then(function(d){$id('cid').value=d.camera_id;});});
+$id('bs').addEventListener('click',startCam);$id('bt').addEventListener('click',stopCam);
+$id('bm').addEventListener('click',function(){muted=!muted;if(stream)stream.getAudioTracks().forEach(function(t){t.enabled=!muted;});$id('bm').textContent=muted?'UNMUTE':'MUTE';});
+try{var sid=localStorage.getItem('camId');if(sid)$id('cid').value=sid;}catch(e){}
+try{var snm=localStorage.getItem('camName');if(snm)$id('nm').value=snm;}catch(e){}
+window.addEventListener('beforeunload',function(){closeAll();if(stream)stream.getTracks().forEach(function(t){t.stop();});});
+log('starting id='+myId);loop();
+})();
+</script></body></html>
