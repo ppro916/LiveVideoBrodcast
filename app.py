@@ -507,6 +507,17 @@ if __name__ == '__main__':
     init_db()
     load_ads()
     p = int(os.environ.get('PORT', '5050'))
-    print('* BROADCAST SERVER  http://0.0.0.0:%d' % p)
+    print('* BROADCAST SERVER  https://0.0.0.0:%d' % p)
     print('    /control  -> operator   /watch -> audience   /camera -> camera node')
-    app.run(ssl_context=('certs/cert.pem', 'certs/key.pem'), host='0.0.0.0', port=p, threaded=True, debug=False, use_reloader=False)
+    # HTTPS is required for camera access (getUserMedia) on non-localhost origins.
+    # Provide your own cert/key via SSL_CERT_FILE / SSL_KEY_FILE; otherwise a throw-away
+    # self-signed certificate is generated in memory at start-up (needs `cryptography`).
+    cert = os.environ.get('SSL_CERT_FILE', os.path.join(BASE, 'certs', 'cert.pem'))
+    key  = os.environ.get('SSL_KEY_FILE',  os.path.join(BASE, 'certs', 'key.pem'))
+    if os.path.isfile(cert) and os.path.isfile(key):
+        ssl_ctx = (cert, key)
+    else:
+        print('* No SSL_CERT_FILE/SSL_KEY_FILE found - using an ad-hoc self-signed certificate')
+        ssl_ctx = 'adhoc'
+    app.run(ssl_context=ssl_ctx, host=os.environ.get('HOST', '0.0.0.0'), port=p,
+            threaded=True, debug=False, use_reloader=False)
